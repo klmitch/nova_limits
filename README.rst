@@ -28,3 +28,8 @@ database.  (If no such association is present, the rate-limit class
 for a tenant is ``default``.)  Setting ``rate_class`` on
 ``NovaClassLimit`` restricts the limiting action to only those tenants
 in the given rate-limit class.
+
+Also note that, for nova, the URIs used in configuring rate limiting
+come after the version identifier.  For instance, to limit the rate at
+which accesses to "/v2/{tenant}/servers/detail" can be made, the URI
+to configure is "/{tenant}/servers/detail".
