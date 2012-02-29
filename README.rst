@@ -11,8 +11,20 @@ the following configuration::
 
     [filter:turnstile]
     paste.filter_factory = turnstile.middleware:turnstile_filter
-    redis.host = <your Redis database host>
     preprocess = nova_limits:nova_preprocess
+    redis.host = <your Redis database host>
 
 Then, simply use the ``nova_limits:NovaClassLimit`` rate limit class
 in your configuration.
+
+Using ``NovaClassLimit``
+========================
+
+In addition to the other attributes provided by
+``turnstile.limits:Limit``, the ``NovaClassLimit`` limit class
+provides one additional required argument: the ``rate_class``.  Each
+tenant is associated with a given rate-limit class through the Redis
+database.  (If no such association is present, the rate-limit class
+for a tenant is ``default``.)  Setting ``rate_class`` on
+``NovaClassLimit`` restricts the limiting action to only those tenants
+in the given rate-limit class.
