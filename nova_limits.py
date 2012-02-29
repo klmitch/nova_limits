@@ -21,8 +21,8 @@ def nova_preprocess(midware, environ):
     environ['turnstile.nova.tenant'] = tenant
 
     # Now, figure out the rate limit class
-    class = self.db.get('limit-class:%s' % tenant) or 'default'
-    environ['turnstile.nova.limitclass'] = class
+    klass = self.db.get('limit-class:%s' % tenant) or 'default'
+    environ['turnstile.nova.limitclass'] = klass
 
 
 class NovaClassLimit(limits.Limit):
@@ -47,7 +47,7 @@ class NovaClassLimit(limits.Limit):
 
         # Do we match?
         if ('turnstile.nova.limitclass' not in environ or
-            self.class != environ['turnstile.nova.limitclass']):
+            self.rate_class != environ['turnstile.nova.limitclass']):
             raise limits.DeferLimit()
 
         # OK, add the tenant to the params
