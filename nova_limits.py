@@ -13,7 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import time
+
+from nova.api.openstack import wsgi
+
 from turnstile import limits
+from turnstile import middleware
 
 
 def nova_preprocess(midware, environ):
@@ -38,6 +43,42 @@ def nova_preprocess(midware, environ):
     # Now, figure out the rate limit class
     klass = midware.db.get('limit-class:%s' % tenant) or 'default'
     environ['turnstile.nova.limitclass'] = klass
+
+    # Finally, translate Turnstile limits into Nova limits, so we can
+    # use Nova's /limits endpoint
+    limits = []
+    for turns_lim in midware.limits:
+        # If the limit has a rate_class, ensure it equals the
+        # appropriate one for the user.  If the limit does not have a
+        # rate_class, we want to include it in the final list.
+        if getattr(turns_lim, 'rate_class', klass) != klass:
+            continue
+
+        # Translate some information squirreled away in the limit
+        verbs = turns_lim.verbs or ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
+        unit = turns_lim.unit.upper()
+        if unit.isdigit():
+            unit = 'UNKNOWN'
+
+        # Now, build a representation of the limit
+        for verb in verbs:
+            limits.append(dict(
+                    verb=verb,
+                    URI=turns_lim.uri,
+                    regex=turns_lim.uri,
+                    value=turns_lim.value,
+                    unit=unit,
+
+                    # We simply don't have enough information
+                    # available to determine these values, because it
+                    # depends on exactly which URL was requested.  We
+                    # therefore fall back to using wide-open values.
+                    remaining=turns_lim.value,
+                    resetTime=time.time(),
+                    ))
+
+    # Save the limits for Nova to use
+    environ['nova.limits'] = limits
 
 
 class NovaClassLimit(limits.Limit):
@@ -67,3 +108,39 @@ class NovaClassLimit(limits.Limit):
 
         # OK, add the tenant to the params
         params['tenant'] = environ['turnstile.nova.tenant']
+
+
+class NovaTurnstileMiddleware(middleware.TurnstileMiddleware):
+    """
+    Subclass of TurnstileMiddleware.
+
+    This version of TurnstileMiddleware overrides the format_delay()
+    method to utilize Nova's OverLimitFault.
+    """
+
+    def format_delay(self, delay, limit, bucket, environ, start_response):
+        """
+        Formats the over-limit response for the request.  This variant
+        utilizes Nova's OverLimitFault for consistency with Nova's
+        rate-limiting.
+        """
+
+        # Build the error message based on the limit's values
+        args = dict(
+            value=limit.value,
+            verb=environ['REQUEST_METHOD'],
+            uri=limit.uri,
+            unit_string=limit.unit.upper(),
+            )
+        error = _("Only %(value)s %(verb)s request(s) can be "
+                  "made to %(uri)s every %(unit_string)s.") % args
+
+        # Set up the rest of the arguments for wsgi.OverLimitFault
+        msg = _("This request was rate-limited.")
+        retry = time.time() + delay
+
+        # Convert to a fault class
+        fault = wsgi.OverLimitFault(msg, error, retry)
+
+        # Now let's call it and return the result
+        return fault(environ, start_response)
