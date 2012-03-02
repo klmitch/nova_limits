@@ -95,7 +95,7 @@ class NovaClassLimit(limits.Limit):
             ),
         )
 
-    def filter(self, environ, params):
+    def filter(self, environ, params, unused):
         """
         Determines whether this limit applies to this request and
         attaches the tenant name to the params.
