@@ -95,6 +95,18 @@ class NovaClassLimit(limits.Limit):
             ),
         )
 
+    def route(self, uri, route_args):
+        """
+        Filter version identifiers off of the URI.
+        """
+
+        if uri.startswith('/v1.1/'):
+            return uri[5:]
+        elif uri.startswith('/v2/'):
+            return uri[3:]
+
+        return uri
+
     def filter(self, environ, params, unused):
         """
         Determines whether this limit applies to this request and
