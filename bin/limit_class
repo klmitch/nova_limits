@@ -1,0 +1,19 @@
+#!/usr/bin/python
+
+import os
+import sys
+
+
+# We need the tools module from turnstile
+poss_topdir = os.path.normpath(os.path.join(os.path.abspath(sys.argv[0]),
+                                            os.pardir,
+                                            os.pardir))
+if os.path.exists(os.path.join(poss_topdir, 'nova_limits.py')):
+    sys.path.insert(0, poss_topdir)
+
+
+import nova_limits
+
+
+if __name__ == '__main__':
+    nova_limits.limit_class()

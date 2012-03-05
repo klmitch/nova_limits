@@ -15,10 +15,12 @@
 
 import time
 
+import argparse
 from nova.api.openstack import wsgi
 
 from turnstile import limits
 from turnstile import middleware
+from turnstile import tools
 
 
 def nova_preprocess(midware, environ):
@@ -156,3 +158,79 @@ class NovaTurnstileMiddleware(middleware.TurnstileMiddleware):
 
         # Now let's call it and return the result
         return fault(environ, start_response)
+
+
+def _limit_class(config, tenant, klass=None):
+    """
+    Set up or query limit classes associated with tenants.
+
+    :param config: Name of the configuration file, for connecting to
+                   the Redis database.
+    :param tenant: The ID of the tenant.
+    :param klass: If provided, the name of the class to map the tenant
+                  to.
+
+    Returns the class associated with the given tenant.
+    """
+
+    # Connect to the database...
+    db, _limits_key, _control_channel = tools.parse_config(config)
+
+    # Get the key for the limit class...
+    key = 'limit-class:%s' % tenant
+
+    # Now, look up the tenant's current class
+    old_klass = midware.db.get(key) or 'default'
+
+    # Do we need to change it?
+    if klass and klass != old_klass:
+        if klass == 'default':
+            # Resetting to the default
+            db.delete(key)
+        else:
+            # Changing to a new value
+            db.set(key, klass)
+
+    return old_klass
+
+
+def limit_class():
+    """
+    Console script entry point for setting limit classes.
+    """
+
+    parser = argparse.ArgumentParser(
+        description="Set up or query limit classes associated with tenants.",
+        )
+
+    parser.add_argument('config',
+                        help="Name of the configuration file, for connecting "
+                        "to the Redis database.")
+    parser.add_argument('tenant_id',
+                        help="ID of the tenant.")
+    parser.add_argument('--debug', '-d',
+                        dest='debug',
+                        action='store_true',
+                        default=False,
+                        help="Run the tool in debug mode.")
+    parser.add_argument('--class', '-c',
+                        dest='klass',
+                        action='store',
+                        default=None,
+                        help="If specified, sets the class associated with "
+                        "the given tenant ID.")
+
+    args = parser.parse_args()
+    try:
+        klass = _limit_class(args.config, args.tenant_id, args.klass)
+
+        print "Tenant %s:" % args.tenant_id
+        if args.klass:
+            print "  Previous rate-limit class: %s" % klass
+            print "  New rate-limit class: %s" % args.klass
+        else:
+            print "  Configured rate-limit class: %s" % klass
+    except Exception as exc:
+        if args.debug:
+            raise
+        return str(exc)
