@@ -42,7 +42,7 @@ def nova_preprocess(midware, environ):
 
     # Now, figure out the rate limit class
     klass = midware.db.get('limit-class:%s' % tenant) or 'default'
-    environ['turnstile.nova.limitclass'] = klass
+    klass = environ.setdefault('turnstile.nova.limitclass', klass)
 
     # Finally, translate Turnstile limits into Nova limits, so we can
     # use Nova's /limits endpoint
