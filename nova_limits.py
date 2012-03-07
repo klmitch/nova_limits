@@ -180,7 +180,7 @@ def _limit_class(config, tenant, klass=None):
     key = 'limit-class:%s' % tenant
 
     # Now, look up the tenant's current class
-    old_klass = midware.db.get(key) or 'default'
+    old_klass = db.get(key) or 'default'
 
     # Do we need to change it?
     if klass and klass != old_klass:
