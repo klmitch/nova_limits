@@ -116,7 +116,8 @@ class NovaClassLimit(limits.Limit):
         """
 
         # Do we match?
-        if ('turnstile.nova.limitclass' not in environ or
+        if ('turnstile.nova.tenant' not in environ or
+            'turnstile.nova.limitclass' not in environ or
             self.rate_class != environ['turnstile.nova.limitclass']):
             raise limits.DeferLimit()
 
