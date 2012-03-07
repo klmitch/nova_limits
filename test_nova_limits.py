@@ -373,3 +373,99 @@ class TestNovaTurnstileMiddleware(unittest.TestCase):
         self.assertEqual(result[2], 1000000018)
         self.assertEqual(id(result[3]), id(environ))
         self.assertEqual(id(result[4]), id(start_response))
+
+
+class TestLimitClass(unittest.TestCase):
+    def setUp(self):
+        self.fake_db = FakeDatabase()
+        self.stubs = stubout.StubOutForTesting()
+
+        def fake_parse_config(config):
+            self.assertEqual(config, 'config_file')
+            return self.fake_db, 'limits', 'control'
+
+        self.stubs.Set(tools, 'parse_config', fake_parse_config)
+
+    def tearDown(self):
+        self.stubs.UnsetAll()
+
+    def test_get(self):
+        self.fake_db.fake_db['limit-class:spam'] = 'lim_class'
+        old_klass = nova_limits._limit_class('config_file', 'spam')
+
+        self.assertEqual(self.fake_db.fake_db, {
+                'limit-class:spam': 'lim_class',
+                })
+        self.assertEqual(self.fake_db.actions, [
+                ('get', 'limit-class:spam'),
+                ])
+        self.assertEqual(old_klass, 'lim_class')
+
+    def test_get_undeclared(self):
+        old_klass = nova_limits._limit_class('config_file', 'spam')
+
+        self.assertEqual(self.fake_db.fake_db, {})
+        self.assertEqual(self.fake_db.actions, [
+                ('get', 'limit-class:spam'),
+                ])
+        self.assertEqual(old_klass, 'default')
+
+    def test_set(self):
+        self.fake_db.fake_db['limit-class:spam'] = 'old_class'
+        old_klass = nova_limits._limit_class('config_file', 'spam',
+                                             'new_class')
+
+        self.assertEqual(self.fake_db.fake_db, {
+                'limit-class:spam': 'new_class',
+                })
+        self.assertEqual(self.fake_db.actions, [
+                ('get', 'limit-class:spam'),
+                ('set', 'limit-class:spam', 'new_class'),
+                ])
+        self.assertEqual(old_klass, 'old_class')
+
+    def test_set_undeclared(self):
+        old_klass = nova_limits._limit_class('config_file', 'spam',
+                                             'new_class')
+
+        self.assertEqual(self.fake_db.fake_db, {
+                'limit-class:spam': 'new_class',
+                })
+        self.assertEqual(self.fake_db.actions, [
+                ('get', 'limit-class:spam'),
+                ('set', 'limit-class:spam', 'new_class'),
+                ])
+        self.assertEqual(old_klass, 'default')
+
+    def test_set_unchanged(self):
+        self.fake_db.fake_db['limit-class:spam'] = 'lim_class'
+        old_klass = nova_limits._limit_class('config_file', 'spam',
+                                             'lim_class')
+
+        self.assertEqual(self.fake_db.fake_db, {
+                'limit-class:spam': 'lim_class',
+                })
+        self.assertEqual(self.fake_db.actions, [
+                ('get', 'limit-class:spam'),
+                ])
+        self.assertEqual(old_klass, 'lim_class')
+
+    def test_delete(self):
+        self.fake_db.fake_db['limit-class:spam'] = 'old_class'
+        old_klass = nova_limits._limit_class('config_file', 'spam', 'default')
+
+        self.assertEqual(self.fake_db.fake_db, {})
+        self.assertEqual(self.fake_db.actions, [
+                ('get', 'limit-class:spam'),
+                ('delete', 'limit-class:spam'),
+                ])
+        self.assertEqual(old_klass, 'old_class')
+
+    def test_delete_undeclared(self):
+        old_klass = nova_limits._limit_class('config_file', 'spam', 'default')
+
+        self.assertEqual(self.fake_db.fake_db, {})
+        self.assertEqual(self.fake_db.actions, [
+                ('get', 'limit-class:spam'),
+                ])
+        self.assertEqual(old_klass, 'default')
