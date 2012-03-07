@@ -5,6 +5,7 @@ import unittest
 
 import argparse
 import stubout
+from turnstile import limits
 from turnstile import tools
 
 import nova_limits
@@ -234,3 +235,103 @@ class TestPreprocess(unittest.TestCase):
         self.assertEqual(db.actions, [
                 ('get', 'limit-class:spam'),
                 ])
+
+
+class TestNovaClassLimit(unittest.TestCase):
+    def setUp(self):
+        self.lim = nova_limits.NovaClassLimit('db', uri='/spam', value=18,
+                                              unit='second',
+                                              rate_class='lim_class')
+
+    def test_route_base(self):
+        route_args = {}
+        result = self.lim.route('/spam', route_args)
+
+        self.assertEqual(result, '/spam')
+
+    def test_route_v1(self):
+        route_args = {}
+        result = self.lim.route('/v1.1/spam', route_args)
+
+        self.assertEqual(result, '/spam')
+
+    def test_route_v2(self):
+        route_args = {}
+        result = self.lim.route('/v2/spam', route_args)
+
+        self.assertEqual(result, '/spam')
+
+    def test_route_v1_base(self):
+        route_args = {}
+        result = self.lim.route('/v1.1', route_args)
+
+        self.assertEqual(result, '/v1.1')
+
+    def test_route_v2_base(self):
+        route_args = {}
+        result = self.lim.route('/v2', route_args)
+
+        self.assertEqual(result, '/v2')
+
+    def test_filter_noclass(self):
+        environ = {
+            'turnstile.nova.tenant': 'tenant',
+            }
+        params = {}
+        unused = {}
+        with self.assertRaises(limits.DeferLimit):
+            self.lim.filter(environ, params, unused)
+
+        self.assertEqual(environ, {
+                'turnstile.nova.tenant': 'tenant',
+                })
+        self.assertEqual(params, {})
+        self.assertEqual(unused, {})
+
+    def test_filter_notenant(self):
+        environ = {
+            'turnstile.nova.limitclass': 'lim_class',
+            }
+        params = {}
+        unused = {}
+        with self.assertRaises(limits.DeferLimit):
+            self.lim.filter(environ, params, unused)
+
+        self.assertEqual(environ, {
+                'turnstile.nova.limitclass': 'lim_class',
+                })
+        self.assertEqual(params, {})
+        self.assertEqual(unused, {})
+
+    def test_filter_wrong_class(self):
+        environ = {
+            'turnstile.nova.limitclass': 'spam',
+            'turnstile.nova.tenant': 'tenant',
+            }
+        params = {}
+        unused = {}
+        with self.assertRaises(limits.DeferLimit):
+            self.lim.filter(environ, params, unused)
+
+        self.assertEqual(environ, {
+                'turnstile.nova.limitclass': 'spam',
+                'turnstile.nova.tenant': 'tenant',
+                })
+        self.assertEqual(params, {})
+        self.assertEqual(unused, {})
+
+    def test_filter(self):
+        environ = {
+            'turnstile.nova.limitclass': 'lim_class',
+            'turnstile.nova.tenant': 'tenant',
+            }
+        params = {}
+        unused = {}
+        self.lim.filter(environ, params, unused)
+
+        self.assertEqual(environ, {
+                'turnstile.nova.limitclass': 'lim_class',
+                'turnstile.nova.tenant': 'tenant',
+                })
+        self.assertEqual(params, dict(tenant='tenant'))
+        self.assertEqual(unused, {})
