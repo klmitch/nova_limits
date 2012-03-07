@@ -17,7 +17,6 @@ import time
 
 import argparse
 from nova.api.openstack import wsgi
-
 from turnstile import limits
 from turnstile import middleware
 from turnstile import tools
