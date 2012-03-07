@@ -4,6 +4,7 @@ import time
 import unittest
 
 import argparse
+from nova.api.openstack import wsgi
 import stubout
 from turnstile import limits
 from turnstile import tools
@@ -335,3 +336,40 @@ class TestNovaClassLimit(unittest.TestCase):
                 })
         self.assertEqual(params, dict(tenant='tenant'))
         self.assertEqual(unused, {})
+
+
+class StubNovaTurnstileMiddleware(nova_limits.NovaTurnstileMiddleware):
+    def __init__(self):
+        pass
+
+
+class TestNovaTurnstileMiddleware(unittest.TestCase):
+    def setUp(self):
+        self.midware = StubNovaTurnstileMiddleware()
+        self.stubs = stubout.StubOutForTesting()
+
+        def fake_over_limit_fault(msg, err, retry):
+            def inner(environ, start_response):
+                return (msg, err, retry, environ, start_response)
+            return inner
+
+        self.stubs.Set(wsgi, 'OverLimitFault', fake_over_limit_fault)
+        self.stubs.Set(time, 'time', lambda: 1000000000)
+
+    def tearDown(self):
+        self.stubs.UnsetAll()
+
+    def test_format_delay(self):
+        lim = FakeObject(value=23, uri='/spam', unit='second')
+        environ = dict(REQUEST_METHOD='SPAM')
+        start_response = lambda: None
+        result = self.midware.format_delay(18, lim, None,
+                                           environ, start_response)
+
+        self.assertEqual(result[0], 'This request was rate-limited.')
+        self.assertEqual(result[1],
+                         'Only 23 SPAM request(s) can be made to /spam '
+                         'every SECOND.')
+        self.assertEqual(result[2], 1000000018)
+        self.assertEqual(id(result[3]), id(environ))
+        self.assertEqual(id(result[4]), id(start_response))
