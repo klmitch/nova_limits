@@ -8,14 +8,14 @@ def read(fname):
 
 setup(
     name='nova_limits',
-    version='0.3',
+    version='0.5',
     author='Kevin L. Mitchell',
     author_email='kevin.mitchell@rackspace.com',
     description="Nova-specific rate-limit class for turnstile",
     license='Apache License (2.0)',
     py_modules=['nova_limits'],
     classifiers=[
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 4 - Beta',
         'Environment :: Web Environment',
         'Framework :: Paste',
         'Intended Audience :: System Administrators',
@@ -32,6 +32,10 @@ setup(
         },
     install_requires=[
         'argparse',
+        'nova',
         'turnstile',
+        ],
+    tests_require=[
+        'mox',
         ],
     )
