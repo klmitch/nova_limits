@@ -469,3 +469,91 @@ class TestLimitClass(unittest.TestCase):
                 ('get', 'limit-class:spam'),
                 ])
         self.assertEqual(old_klass, 'default')
+
+
+class FakeNamespace(object):
+    config = 'config'
+    tenant_id = 'spam'
+    debug = False
+    klass = None
+
+    def __init__(self, nsdict):
+        self.__dict__.update(nsdict)
+
+
+class FakeArgumentParser(object):
+    def __init__(self, nsdict):
+        self._namespace = FakeNamespace(nsdict)
+
+    def add_argument(self, *args, **kwargs):
+        pass
+
+    def parse_args(self):
+        return self._namespace
+
+
+class TestToolLimitClass(unittest.TestCase):
+    def setUp(self):
+        self.stubs = stubout.StubOutForTesting()
+
+        self.limit_class_result = None
+        self.limit_class_args = None
+
+        self.args_dict = {}
+
+        self.stdout = StringIO.StringIO()
+
+        def fake_limit_class(config, tenant_id, klass=None):
+            self.limit_class_args = (config, tenant_id, klass)
+            if isinstance(self.limit_class_result, Exception):
+                raise self.limit_class_result
+            return self.limit_class_result
+
+        def fake_argument_parser(*args, **kwargs):
+            return FakeArgumentParser(self.args_dict)
+
+        self.stubs.Set(nova_limits, '_limit_class', fake_limit_class)
+        self.stubs.Set(argparse, 'ArgumentParser', fake_argument_parser)
+        self.stubs.Set(sys, 'stdout', self.stdout)
+
+    def tearDown(self):
+        self.stubs.UnsetAll()
+
+    def test_noargs(self):
+        self.limit_class_result = 'default'
+        result = nova_limits.limit_class()
+
+        self.assertEqual(self.limit_class_args, ('config', 'spam', None))
+        self.assertEqual(self.stdout.getvalue(),
+                         'Tenant spam:\n'
+                         '  Configured rate-limit class: default\n')
+        self.assertEqual(result, None)
+
+    def test_failure(self):
+        self.limit_class_result = Exception("foobar")
+        result = nova_limits.limit_class()
+
+        self.assertEqual(result, "foobar")
+        self.assertEqual(self.stdout.getvalue(), '')
+
+    def test_failure_debug(self):
+        class AnException(Exception):
+            pass
+
+        self.args_dict['debug'] = True
+        self.limit_class_result = AnException("foobar")
+        with self.assertRaises(AnException):
+            nova_limits.limit_class()
+        self.assertEqual(self.stdout.getvalue(), '')
+
+    def test_update(self):
+        self.args_dict['klass'] = 'new_class'
+        self.limit_class_result = 'old_class'
+        nova_limits.limit_class()
+
+        self.assertEqual(self.limit_class_args,
+                         ('config', 'spam', 'new_class'))
+        self.assertEqual(self.stdout.getvalue(),
+                         'Tenant spam:\n'
+                         '  Previous rate-limit class: old_class\n'
+                         '  New rate-limit class: new_class\n')
