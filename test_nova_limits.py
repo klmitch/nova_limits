@@ -116,32 +116,43 @@ class TestPreprocess(unittest.TestCase):
         db = FakeDatabase({'limit-class:spam': 'lim_class'})
         midware = FakeMiddleware(db, [
                 FakeObject(
+                    queries=[],
                     verbs=['GET', 'PUT'],
                     unit='minute',
                     uri='/spam/uri',
                     value=23),
                 FakeObject(
+                    queries=[],
                     verbs=[],
                     unit='second',
                     uri='/spam/uri2',
                     value=18),
                 FakeObject(
                     rate_class='spam',
+                    queries=[],
                     verbs=['GET'],
                     unit='hour',
                     uri='/spam/uri3',
                     value=17),
                 FakeObject(
                     rate_class='lim_class',
+                    queries=[],
                     verbs=['GET'],
                     unit='day',
                     uri='/spam/uri4',
                     value=1),
                 FakeObject(
+                    queries=[],
                     verbs=['GET'],
                     unit='1234',
                     uri='/spam/uri5',
                     value=183),
+                FakeObject(
+                    queries=['bravo', 'alfa'],
+                    verbs=['GET'],
+                    unit='day',
+                    uri='/spam/uri6',
+                    value=1),
                 ])
         environ = {
             'nova.context': FakeObject(project_id='spam'),
@@ -230,6 +241,15 @@ class TestPreprocess(unittest.TestCase):
                     value=183,
                     unit='UNKNOWN',
                     remaining=183,
+                    resetTime=1000000000,
+                    ),
+                dict(
+                    verb='GET',
+                    URI='/spam/uri6?alfa={alfa}&bravo={bravo}',
+                    regex='/spam/uri6?alfa={alfa}&bravo={bravo}',
+                    value=1,
+                    unit='DAY',
+                    remaining=1,
                     resetTime=1000000000,
                     ),
                 ])

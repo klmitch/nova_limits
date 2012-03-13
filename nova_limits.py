@@ -55,6 +55,13 @@ def nova_preprocess(midware, environ):
         if getattr(turns_lim, 'rate_class', klass) != klass:
             continue
 
+        # Account for queries for the uri...
+        uri = turns_lim.uri
+        if turns_lim.queries:
+            uri = ('%s?%s' % (uri,
+                              '&'.join('%s={%s}' % (qstr, qstr) for qstr in
+                                       sorted(turns_lim.queries))))
+
         # Translate some information squirreled away in the limit
         verbs = turns_lim.verbs or ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
         unit = turns_lim.unit.upper()
@@ -65,8 +72,8 @@ def nova_preprocess(midware, environ):
         for verb in verbs:
             limits.append(dict(
                     verb=verb,
-                    URI=turns_lim.uri,
-                    regex=turns_lim.uri,
+                    URI=uri,
+                    regex=uri,
                     value=turns_lim.value,
                     unit=unit,
 
