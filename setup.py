@@ -8,7 +8,7 @@ def read(fname):
 
 setup(
     name='nova_limits',
-    version='0.5.1',
+    version='0.5.2a',
     author='Kevin L. Mitchell',
     author_email='kevin.mitchell@rackspace.com',
     description="Nova-specific rate-limit class for turnstile",
@@ -32,6 +32,7 @@ setup(
         },
     install_requires=[
         'argparse',
+        'msgpack-python',
         'nova',
         'turnstile',
         ],
