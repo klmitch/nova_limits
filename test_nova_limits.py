@@ -1,9 +1,11 @@
+import json
 import StringIO
 import sys
 import time
 import unittest
 
 import argparse
+import msgpack
 from nova.api.openstack import wsgi
 import stubout
 from turnstile import limits
@@ -13,9 +15,17 @@ import nova_limits
 
 
 class FakeDatabase(object):
-    def __init__(self, fake_db=None):
+    def __init__(self, fake_db=None, *buckets):
         self.fake_db = fake_db or {}
         self.actions = []
+        self.buckets = [k for k in self.fake_db if k.startswith('bucket:')]
+        # Add buckets that don't exist
+        if buckets:
+            self.buckets.extend(buckets)
+
+    def keys(self, pattern):
+        self.actions.append(('keys', pattern))
+        return self.buckets
 
     def get(self, key):
         self.actions.append(('get', key))
@@ -38,8 +48,39 @@ class FakeMiddleware(object):
 
 
 class FakeObject(object):
-    def __init__(self, **kwargs):
+    def __init__(self, *args, **kwargs):
+        self._args = args
         self.__dict__.update(kwargs)
+
+
+class FakeBucket(FakeObject):
+    @classmethod
+    def hydrate(cls, db, kwargs, *args):
+        return cls(db, *args, **kwargs)
+
+
+class FakeLimit(FakeObject):
+    bucket_class = FakeBucket
+
+    def decode(self, key):
+        _pre, sep, params = key.partition('/')
+        if sep != '/':
+            return {}
+        return json.loads(params)
+
+
+class TestParamsDict(unittest.TestCase):
+    def test_known_keys(self):
+        d = nova_limits.ParamsDict(dict(a=1, bravo=2))
+
+        self.assertEqual(d['a'], 1)
+        self.assertEqual(d['bravo'], 2)
+
+    def test_unknown_keys(self):
+        d = nova_limits.ParamsDict(dict(a=1, b=2))
+
+        self.assertEqual(d['c'], '{c}')
+        self.assertEqual(d['delta'], '{delta}')
 
 
 class TestPreprocess(unittest.TestCase):
@@ -47,6 +88,7 @@ class TestPreprocess(unittest.TestCase):
         self.stubs = stubout.StubOutForTesting()
 
         self.stubs.Set(time, 'time', lambda: 1000000000)
+        self.stubs.Set(msgpack, 'loads', lambda x: x)
 
     def tearDown(self):
         self.stubs.UnsetAll()
@@ -64,6 +106,7 @@ class TestPreprocess(unittest.TestCase):
                 })
         self.assertEqual(db.actions, [
                 ('get', 'limit-class:<NONE>'),
+                ('keys', 'bucket:*'),
                 ])
 
     def test_tenant(self):
@@ -79,6 +122,7 @@ class TestPreprocess(unittest.TestCase):
         self.assertEqual(environ['nova.limits'], [])
         self.assertEqual(db.actions, [
                 ('get', 'limit-class:spam'),
+                ('keys', 'bucket:*'),
                 ])
 
     def test_configured_class(self):
@@ -94,6 +138,7 @@ class TestPreprocess(unittest.TestCase):
         self.assertEqual(environ['nova.limits'], [])
         self.assertEqual(db.actions, [
                 ('get', 'limit-class:spam'),
+                ('keys', 'bucket:*'),
                 ])
 
     def test_class_no_override(self):
@@ -110,24 +155,28 @@ class TestPreprocess(unittest.TestCase):
         self.assertEqual(environ['nova.limits'], [])
         self.assertEqual(db.actions, [
                 ('get', 'limit-class:spam'),
+                ('keys', 'bucket:*'),
                 ])
 
     def test_limits(self):
         db = FakeDatabase({'limit-class:spam': 'lim_class'})
         midware = FakeMiddleware(db, [
                 FakeObject(
+                    uuid='uuid',
                     queries=[],
                     verbs=['GET', 'PUT'],
                     unit='minute',
                     uri='/spam/uri',
                     value=23),
                 FakeObject(
+                    uuid='uuid2',
                     queries=[],
                     verbs=[],
                     unit='second',
                     uri='/spam/uri2',
                     value=18),
                 FakeObject(
+                    uuid='uuid3',
                     rate_class='spam',
                     queries=[],
                     verbs=['GET'],
@@ -135,6 +184,7 @@ class TestPreprocess(unittest.TestCase):
                     uri='/spam/uri3',
                     value=17),
                 FakeObject(
+                    uuid='uuid4',
                     rate_class='lim_class',
                     queries=[],
                     verbs=['GET'],
@@ -142,12 +192,14 @@ class TestPreprocess(unittest.TestCase):
                     uri='/spam/uri4',
                     value=1),
                 FakeObject(
+                    uuid='uuid5',
                     queries=[],
                     verbs=['GET'],
                     unit='1234',
                     uri='/spam/uri5',
                     value=183),
                 FakeObject(
+                    uuid='uuid6',
                     queries=['bravo', 'alfa'],
                     verbs=['GET'],
                     unit='day',
@@ -255,6 +307,137 @@ class TestPreprocess(unittest.TestCase):
                 ])
         self.assertEqual(db.actions, [
                 ('get', 'limit-class:spam'),
+                ('keys', 'bucket:*'),
+                ])
+
+    def test_limits_with_buckets(self):
+        db = FakeDatabase({
+                'limit-class:spam': 'lim_class',
+                'bucket:uuid': dict(
+                    messages=2,
+                    expire=1000000001,
+                    ),
+                'bucket:uuid2/{"unused": "foo"}': dict(
+                    messages=5,
+                    expire=999999999,
+                    ),
+                'bucket:uuid3/{"param": "foo"}': dict(
+                    messages=10,
+                    expire=1000000005,
+                    ),
+                'bucket:uuid3/{"param": "bar"}': dict(
+                    messages=5,
+                    expire=1000000001,
+                    ),
+                }, 'bucket:uuid4/{"param": "baz"}', 'bucket:uuid6')
+        midware = FakeMiddleware(db, [
+                FakeLimit(
+                    uuid='uuid',
+                    queries=[],
+                    verbs=['GET'],
+                    unit='minute',
+                    uri='/spam/{uri}',
+                    value=7),
+                FakeLimit(
+                    uuid='uuid2',
+                    queries=[],
+                    verbs=['GET'],
+                    unit='minute',
+                    uri='/spam/{uri2}/{used}',
+                    value=20),
+                FakeLimit(
+                    uuid='uuid3',
+                    queries=[],
+                    verbs=['GET'],
+                    unit='minute',
+                    uri='/spam/{uri3}/{param}',
+                    value=50),
+                FakeLimit(
+                    uuid='uuid4',
+                    queries=[],
+                    verbs=['GET'],
+                    unit='minute',
+                    uri='/spam/{uri4}/{param}',
+                    value=50),
+                FakeLimit(
+                    uuid='uuid5',
+                    queries=[],
+                    verbs=['GET'],
+                    unit='minute',
+                    uri='/spam/{uri5}',
+                    value=10),
+                ])
+        environ = {
+            'nova.context': FakeObject(project_id='spam'),
+            }
+        nova_limits.nova_preprocess(midware, environ)
+
+        self.assertEqual(environ['turnstile.nova.tenant'], 'spam')
+        self.assertEqual(environ['turnstile.nova.limitclass'], 'lim_class')
+        self.assertEqual(environ['nova.limits'], [
+                dict(
+                    verb='GET',
+                    URI='/spam/{uri}',
+                    regex='/spam/{uri}',
+                    value=7,
+                    unit='MINUTE',
+                    remaining=2,
+                    resetTime=1000000001,
+                    ),
+                dict(
+                    verb='GET',
+                    URI='/spam/{uri2}/{used}',
+                    regex='/spam/{uri2}/{used}',
+                    value=20,
+                    unit='MINUTE',
+                    remaining=5,
+                    resetTime=999999999,
+                    ),
+                dict(
+                    verb='GET',
+                    URI='/spam/{uri3}/foo',
+                    regex='/spam/{uri3}/foo',
+                    value=50,
+                    unit='MINUTE',
+                    remaining=10,
+                    resetTime=1000000005,
+                    ),
+                dict(
+                    verb='GET',
+                    URI='/spam/{uri3}/bar',
+                    regex='/spam/{uri3}/bar',
+                    value=50,
+                    unit='MINUTE',
+                    remaining=5,
+                    resetTime=1000000001,
+                    ),
+                dict(
+                    verb='GET',
+                    URI='/spam/{uri3}/{param}',
+                    regex='/spam/{uri3}/{param}',
+                    value=50,
+                    unit='MINUTE',
+                    remaining=5,
+                    resetTime=1000000005,
+                    ),
+                dict(
+                    verb='GET',
+                    URI='/spam/{uri4}/{param}',
+                    regex='/spam/{uri4}/{param}',
+                    value=50,
+                    unit='MINUTE',
+                    remaining=50,
+                    resetTime=1000000000,
+                    ),
+                dict(
+                    verb='GET',
+                    URI='/spam/{uri5}',
+                    regex='/spam/{uri5}',
+                    value=10,
+                    unit='MINUTE',
+                    remaining=10,
+                    resetTime=1000000000,
+                    ),
                 ])
 
 

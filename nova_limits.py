@@ -13,13 +13,29 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import string
 import time
 
 import argparse
+import msgpack
 from nova.api.openstack import wsgi
 from turnstile import limits
 from turnstile import middleware
 from turnstile import tools
+
+
+class ParamsDict(dict):
+    """
+    Special dictionary for use with our URI formatter below.  Unknown
+    keys default to '{key}'.
+    """
+
+    def __missing__(self, key):
+        """
+        If the key is unknown, return it surrounded by braces.
+        """
+
+        return '{%s}' % key
 
 
 def nova_preprocess(midware, environ):
@@ -30,6 +46,9 @@ def nova_preprocess(midware, environ):
     environment.  This preprocessor must be present to use the
     NovaClassLimit rate limiting class.
     """
+
+    # We may need a formatter later on, so set one up
+    fmt = string.Formatter()
 
     # First, figure out the tenant
     context = environ.get('nova.context')
@@ -45,6 +64,27 @@ def nova_preprocess(midware, environ):
     klass = midware.db.get('limit-class:%s' % tenant) or 'default'
     klass = environ.setdefault('turnstile.nova.limitclass', klass)
 
+    # Grab a list of the available buckets and index them by UUID
+    #
+    # I hate doing it this way, because the docs say keys should not
+    # be used in production code.  However, I don't really see an
+    # alternative: I can't use hashes for buckets, because I need
+    # expireat() and potentially sharding; I can't keep the list of
+    # bucket keys in a set, because it will never shrink and will grow
+    # to be quite huge; that pretty much leaves keys().
+    buckets = {}
+    for key in midware.db.keys('bucket:*'):
+        # Get the UUID of the relevant limit
+        idx = key.find('/')
+        if idx >= 0:
+            uuid = key[7:idx]
+        else:
+            uuid = key[7:]
+
+        # Store the bucket key in the dictionary
+        buckets.setdefault(uuid, [])
+        buckets[uuid].append(key)
+
     # Finally, translate Turnstile limits into Nova limits, so we can
     # use Nova's /limits endpoint
     limits = []
@@ -54,6 +94,21 @@ def nova_preprocess(midware, environ):
         # rate_class, we want to include it in the final list.
         if getattr(turns_lim, 'rate_class', klass) != klass:
             continue
+
+        # Load up any available buckets
+        buck_list = []
+        for key in buckets.get(turns_lim.uuid, []):
+            # It might have expired
+            raw = midware.db.get(key)
+            if raw is None:
+                continue
+
+            # Decode the key and the bucket and store them
+            params = ParamsDict(turns_lim.decode(key))
+            bucket = turns_lim.bucket_class.hydrate(midware.db,
+                                                    msgpack.loads(raw),
+                                                    turns_lim, key)
+            buck_list.append((params, bucket))
 
         # Account for queries for the uri...
         uri = turns_lim.uri
@@ -68,8 +123,32 @@ def nova_preprocess(midware, environ):
         if unit.isdigit():
             unit = 'UNKNOWN'
 
+        # Figure out remaining and resetTime
+        if buck_list:
+            remaining = min(bucket.messages for _params, bucket in buck_list)
+            resetTime = max(bucket.expire for _params, bucket in buck_list)
+        else:
+            remaining = turns_lim.value
+            resetTime = time.time()
+
         # Now, build a representation of the limit
         for verb in verbs:
+            if len(buck_list) > 1:
+                # Generate one entry for each bucket
+                for params, bucket in buck_list:
+                    # Substitute (some of) the values in params to
+                    # make the URI more specific
+                    buck_uri = fmt.vformat(uri, (), params)
+                    limits.append(dict(
+                            verb=verb,
+                            URI=buck_uri,
+                            regex=buck_uri,
+                            value=turns_lim.value,
+                            unit=unit,
+                            remaining=bucket.messages,
+                            resetTime=bucket.expire,
+                            ))
+
             limits.append(dict(
                     verb=verb,
                     URI=uri,
@@ -77,12 +156,9 @@ def nova_preprocess(midware, environ):
                     value=turns_lim.value,
                     unit=unit,
 
-                    # We simply don't have enough information
-                    # available to determine these values, because it
-                    # depends on exactly which URL was requested.  We
-                    # therefore fall back to using wide-open values.
-                    remaining=turns_lim.value,
-                    resetTime=time.time(),
+                    # These values are computed from the buckets...
+                    remaining=remaining,
+                    resetTime=resetTime,
                     ))
 
     # Save the limits for Nova to use
