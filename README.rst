@@ -11,7 +11,7 @@ with nova.  To use, you must configure the Turnstile middleware with
 the following configuration::
 
     [filter:turnstile]
-    paste.filter_factory = turnstile.middleware:turnstile_filter
+    use = egg:turnstile#turnstile
     turnstile = nova_limits:NovaTurnstileMiddleware
     preprocess = nova_limits:nova_preprocess
     redis.host = <your Redis database host>
