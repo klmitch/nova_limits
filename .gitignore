@@ -1,4 +1,8 @@
 /build
+/.coverage
+/cov_html
 /dist
 /nova_limits.egg-info
+/.tox
+*.log
 *.pyc
