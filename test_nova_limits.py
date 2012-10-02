@@ -2,7 +2,6 @@ import json
 import StringIO
 import sys
 import time
-import unittest
 
 import argparse
 import msgpack
@@ -10,6 +9,7 @@ from nova.api.openstack import wsgi
 import stubout
 from turnstile import limits
 from turnstile import tools
+import unittest2
 
 import nova_limits
 
@@ -69,7 +69,7 @@ class FakeLimit(FakeObject):
         return json.loads(params)
 
 
-class TestParamsDict(unittest.TestCase):
+class TestParamsDict(unittest2.TestCase):
     def test_known_keys(self):
         d = nova_limits.ParamsDict(dict(a=1, bravo=2))
 
@@ -83,7 +83,7 @@ class TestParamsDict(unittest.TestCase):
         self.assertEqual(d['delta'], '{delta}')
 
 
-class TestPreprocess(unittest.TestCase):
+class TestPreprocess(unittest2.TestCase):
     def setUp(self):
         self.stubs = stubout.StubOutForTesting()
 
@@ -441,7 +441,7 @@ class TestPreprocess(unittest.TestCase):
                 ])
 
 
-class TestNovaClassLimit(unittest.TestCase):
+class TestNovaClassLimit(unittest2.TestCase):
     def setUp(self):
         self.lim = nova_limits.NovaClassLimit('db', uri='/spam', value=18,
                                               unit='second',
@@ -546,7 +546,7 @@ class StubNovaTurnstileMiddleware(nova_limits.NovaTurnstileMiddleware):
         pass
 
 
-class TestNovaTurnstileMiddleware(unittest.TestCase):
+class TestNovaTurnstileMiddleware(unittest2.TestCase):
     def setUp(self):
         self.midware = StubNovaTurnstileMiddleware()
         self.stubs = stubout.StubOutForTesting()
@@ -578,7 +578,7 @@ class TestNovaTurnstileMiddleware(unittest.TestCase):
         self.assertEqual(id(result[4]), id(start_response))
 
 
-class TestLimitClass(unittest.TestCase):
+class TestLimitClass(unittest2.TestCase):
     def setUp(self):
         self.fake_db = FakeDatabase()
         self.stubs = stubout.StubOutForTesting()
@@ -695,7 +695,7 @@ class FakeArgumentParser(object):
         return self._namespace
 
 
-class TestToolLimitClass(unittest.TestCase):
+class TestToolLimitClass(unittest2.TestCase):
     def setUp(self):
         self.stubs = stubout.StubOutForTesting()
 
