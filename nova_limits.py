@@ -19,9 +19,9 @@ import time
 import argparse
 import msgpack
 from nova.api.openstack import wsgi
+from turnstile import config
 from turnstile import limits
 from turnstile import middleware
-from turnstile import tools
 
 
 class ParamsDict(dict):
@@ -243,12 +243,12 @@ class NovaTurnstileMiddleware(middleware.TurnstileMiddleware):
         return fault(environ, start_response)
 
 
-def _limit_class(config, tenant, klass=None):
+def _limit_class(conf_file, tenant, klass=None):
     """
     Set up or query limit classes associated with tenants.
 
-    :param config: Name of the configuration file, for connecting to
-                   the Redis database.
+    :param conf_file: Name of the configuration file, for connecting
+                      to the Redis database.
     :param tenant: The ID of the tenant.
     :param klass: If provided, the name of the class to map the tenant
                   to.
@@ -257,7 +257,8 @@ def _limit_class(config, tenant, klass=None):
     """
 
     # Connect to the database...
-    db, _limits_key, _control_channel = tools.parse_config(config)
+    conf = config.Config(conf_file=conf_file)
+    db = conf.get_database()
 
     # Get the key for the limit class...
     key = 'limit-class:%s' % tenant

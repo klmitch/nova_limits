@@ -7,8 +7,8 @@ import argparse
 import msgpack
 from nova.api.openstack import wsgi
 import stubout
+from turnstile import config
 from turnstile import limits
-from turnstile import tools
 import unittest2
 
 import nova_limits
@@ -583,11 +583,14 @@ class TestLimitClass(unittest2.TestCase):
         self.fake_db = FakeDatabase()
         self.stubs = stubout.StubOutForTesting()
 
-        def fake_parse_config(config):
-            self.assertEqual(config, 'config_file')
-            return self.fake_db, 'limits', 'control'
+        class FakeConfig(object):
+            def __init__(inst, conf_file=None):
+                self.assertEqual(conf_file, 'config_file')
 
-        self.stubs.Set(tools, 'parse_config', fake_parse_config)
+            def get_database(inst):
+                return self.fake_db
+
+        self.stubs.Set(config, 'Config', FakeConfig)
 
     def tearDown(self):
         self.stubs.UnsetAll()
