@@ -16,12 +16,10 @@
 import string
 import time
 
-import argparse
-import msgpack
 from nova.api.openstack import wsgi
 from turnstile import config
 from turnstile import limits
-from turnstile import middleware
+from turnstile import tools
 
 
 class ParamsDict(dict):
@@ -47,9 +45,6 @@ def nova_preprocess(midware, environ):
     NovaClassLimit rate limiting class.
     """
 
-    # We may need a formatter later on, so set one up
-    fmt = string.Formatter()
-
     # First, figure out the tenant
     context = environ.get('nova.context')
     if context:
@@ -64,26 +59,37 @@ def nova_preprocess(midware, environ):
     klass = midware.db.get('limit-class:%s' % tenant) or 'default'
     klass = environ.setdefault('turnstile.nova.limitclass', klass)
 
+    # Tell Turnstile where to store the bucket keys
+    bucket_set = 'bucket_set:%s' % tenant
+    environ['turnstile.bucket_set'] = bucket_set
+
+    # Trim off expired buckets...
+    midware.db.zremrangebyscore(bucket_set, 0, time.time())
+
+
+def nova_postprocess(midware, environ):
+    """
+    Post-process requests to nova.  This processes all the buckets
+    associated with the rate limit class and inserts a nova-compatible
+    representation into the environment.  This allows the nova /limits
+    endpoint to report the rate limits and current usage.
+    """
+
+    # Get some handy information from the environment
+    klass = environ['turnstile.nova.limitclass']
+    bucket_set = environ['turnstile.bucket_set']
+
+    # We may need a formatter later on, so set one up
+    fmt = string.Formatter()
+
     # Grab a list of the available buckets and index them by UUID
-    #
-    # I hate doing it this way, because the docs say keys should not
-    # be used in production code.  However, I don't really see an
-    # alternative: I can't use hashes for buckets, because I need
-    # expireat() and potentially sharding; I can't keep the list of
-    # bucket keys in a set, because it will never shrink and will grow
-    # to be quite huge; that pretty much leaves keys().
     buckets = {}
-    for key in midware.db.keys('bucket:*'):
-        # Get the UUID of the relevant limit
-        idx = key.find('/')
-        if idx >= 0:
-            uuid = key[7:idx]
-        else:
-            uuid = key[7:]
+    for key in midware.db.zrange(bucket_set, 0, -1):
+        decoded_key = limits.BucketKey.decode(key)
 
         # Store the bucket key in the dictionary
-        buckets.setdefault(uuid, [])
-        buckets[uuid].append(key)
+        buckets.setdefault(decoded_key.uuid, [])
+        buckets[decoded_key.uuid].append(decoded_key)
 
     # Finally, translate Turnstile limits into Nova limits, so we can
     # use Nova's /limits endpoint
@@ -98,17 +104,8 @@ def nova_preprocess(midware, environ):
         # Load up any available buckets
         buck_list = []
         for key in buckets.get(turns_lim.uuid, []):
-            # It might have expired
-            raw = midware.db.get(key)
-            if raw is None:
-                continue
-
-            # Decode the key and the bucket and store them
-            params = ParamsDict(turns_lim.decode(key))
-            bucket = turns_lim.bucket_class.hydrate(midware.db,
-                                                    msgpack.loads(raw),
-                                                    turns_lim, key)
-            buck_list.append((params, bucket))
+            # Load the bucket and save it
+            buck_list.append((ParamsDict(key.params), turns_lim.load(key)))
 
         # Account for queries for the uri...
         uri = turns_lim.uri
@@ -140,26 +137,26 @@ def nova_preprocess(midware, environ):
                     # make the URI more specific
                     buck_uri = fmt.vformat(uri, (), params)
                     limits.append(dict(
-                            verb=verb,
-                            URI=buck_uri,
-                            regex=buck_uri,
-                            value=turns_lim.value,
-                            unit=unit,
-                            remaining=bucket.messages,
-                            resetTime=bucket.expire,
-                            ))
+                        verb=verb,
+                        URI=buck_uri,
+                        regex=buck_uri,
+                        value=turns_lim.value,
+                        unit=unit,
+                        remaining=bucket.messages,
+                        resetTime=bucket.expire,
+                    ))
 
             limits.append(dict(
-                    verb=verb,
-                    URI=uri,
-                    regex=uri,
-                    value=turns_lim.value,
-                    unit=unit,
+                verb=verb,
+                URI=uri,
+                regex=uri,
+                value=turns_lim.value,
+                unit=unit,
 
-                    # These values are computed from the buckets...
-                    remaining=remaining,
-                    resetTime=resetTime,
-                    ))
+                # These values are computed from the buckets...
+                remaining=remaining,
+                resetTime=resetTime,
+            ))
 
     # Save the limits for Nova to use
     environ['nova.limits'] = limits
@@ -176,8 +173,8 @@ class NovaClassLimit(limits.Limit):
         rate_class=dict(
             desc=('The rate limiting class this limit applies to.  Required.'),
             type=str,
-            ),
-        )
+        ),
+    )
 
     def route(self, uri, route_args):
         """
@@ -199,51 +196,87 @@ class NovaClassLimit(limits.Limit):
 
         # Do we match?
         if ('turnstile.nova.tenant' not in environ or
-            'turnstile.nova.limitclass' not in environ or
-            self.rate_class != environ['turnstile.nova.limitclass']):
+                'turnstile.nova.limitclass' not in environ or
+                self.rate_class != environ['turnstile.nova.limitclass']):
             raise limits.DeferLimit()
 
         # OK, add the tenant to the params
         params['tenant'] = environ['turnstile.nova.tenant']
 
 
-class NovaTurnstileMiddleware(middleware.TurnstileMiddleware):
+def nova_formatter(status, delay, limit, bucket, environ, start_response):
     """
-    Subclass of TurnstileMiddleware.
-
-    This version of TurnstileMiddleware overrides the format_delay()
-    method to utilize Nova's OverLimitFault.
+    Formats the over-limit response for the request.  This variant
+    utilizes Nova's OverLimitFault for consistency with Nova's
+    rate-limiting.
     """
 
-    def format_delay(self, delay, limit, bucket, environ, start_response):
-        """
-        Formats the over-limit response for the request.  This variant
-        utilizes Nova's OverLimitFault for consistency with Nova's
-        rate-limiting.
-        """
+    # Build the error message based on the limit's values
+    args = dict(
+        value=limit.value,
+        verb=environ['REQUEST_METHOD'],
+        uri=limit.uri,
+        unit_string=limit.unit.upper(),
+    )
+    error = _("Only %(value)s %(verb)s request(s) can be "
+              "made to %(uri)s every %(unit_string)s.") % args
 
-        # Build the error message based on the limit's values
-        args = dict(
-            value=limit.value,
-            verb=environ['REQUEST_METHOD'],
-            uri=limit.uri,
-            unit_string=limit.unit.upper(),
-            )
-        error = _("Only %(value)s %(verb)s request(s) can be "
-                  "made to %(uri)s every %(unit_string)s.") % args
+    # Set up the rest of the arguments for wsgi.OverLimitFault
+    msg = _("This request was rate-limited.")
+    retry = time.time() + delay
 
-        # Set up the rest of the arguments for wsgi.OverLimitFault
-        msg = _("This request was rate-limited.")
-        retry = time.time() + delay
+    # Convert to a fault class
+    fault = wsgi.OverLimitFault(msg, error, retry)
 
-        # Convert to a fault class
-        fault = wsgi.OverLimitFault(msg, error, retry)
-
-        # Now let's call it and return the result
-        return fault(environ, start_response)
+    # Now let's call it and return the result
+    return fault(environ, start_response)
 
 
-def _limit_class(conf_file, tenant, klass=None):
+def _report_limit_class(args, result):
+    """
+    Report the rate-limit class for the tenant.  This is a
+    postprocessor for the limit_class() function, when being called in
+    console script mode.
+
+    :param args: A Namespace object containing a 'tenant_id' attribute
+                 and a desired rate-limit class (which should be None
+                 if no change was requested).
+    :param result: The result of the limit_class() function call.
+                   This will be the previously configured rate-limit
+                   class for the tenant.
+
+    :returns: None to indicate success.
+    """
+
+    print "Tenant %s:" % args.tenant_id
+    if args.klass:
+        print "  Previous rate-limit class: %s" % result
+        print "  New rate-limit class: %s" % args.klass
+    else:
+        print "  Configured rate-limit class: %s" % result
+
+    return None
+
+
+@add_argument('conf_file',
+              metavar='config',
+              help="Name of the configuration file, for connecting "
+              "to the Redis database.")
+@add_argument('tenant_id',
+              help="ID of the tenant.")
+@add_argument('--debug', '-d',
+              dest='debug',
+              action='store_true',
+              default=False,
+              help="Run the tool in debug mode.")
+@add_argument('--class', '-c',
+              dest='klass',
+              action='store',
+              default=None,
+              help="If specified, sets the class associated with "
+              "the given tenant ID.")
+@add_postprocessor(_report_limit_class)
+def limit_class(conf_file, tenant, klass=None):
     """
     Set up or query limit classes associated with tenants.
 
@@ -278,43 +311,5 @@ def _limit_class(conf_file, tenant, klass=None):
     return old_klass
 
 
-def limit_class():
-    """
-    Console script entry point for setting limit classes.
-    """
-
-    parser = argparse.ArgumentParser(
-        description="Set up or query limit classes associated with tenants.",
-        )
-
-    parser.add_argument('config',
-                        help="Name of the configuration file, for connecting "
-                        "to the Redis database.")
-    parser.add_argument('tenant_id',
-                        help="ID of the tenant.")
-    parser.add_argument('--debug', '-d',
-                        dest='debug',
-                        action='store_true',
-                        default=False,
-                        help="Run the tool in debug mode.")
-    parser.add_argument('--class', '-c',
-                        dest='klass',
-                        action='store',
-                        default=None,
-                        help="If specified, sets the class associated with "
-                        "the given tenant ID.")
-
-    args = parser.parse_args()
-    try:
-        klass = _limit_class(args.config, args.tenant_id, args.klass)
-
-        print "Tenant %s:" % args.tenant_id
-        if args.klass:
-            print "  Previous rate-limit class: %s" % klass
-            print "  New rate-limit class: %s" % args.klass
-        else:
-            print "  Configured rate-limit class: %s" % klass
-    except Exception as exc:
-        if args.debug:
-            raise
-        return str(exc)
+# For backwards compatibility
+_limit_class = limit_class
