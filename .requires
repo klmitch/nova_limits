@@ -1,4 +1,3 @@
 argparse
-msgpack-python
 -e git://github.com/openstack/nova.git#egg=nova
 turnstile>=0.7.0a3
