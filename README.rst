@@ -42,3 +42,25 @@ If the discovered nova context supports quota classes--that is, if the
 context object has the ``quota_class`` attribute--the quota class for
 the context will be set to be the same as the selected rate limit
 class.
+
+Mapping Tenants to Rate Limit Classes
+=====================================
+
+A ``limit_class`` command is provided to control the mapping of the
+tenant ID to the rate limit class.  A usage summary follows::
+
+    usage: limit_class [-h] [--debug] [--class KLASS] config tenant_id
+
+    Set up or query limit classes associated with tenants.
+
+    positional arguments:
+      config                Name of the configuration file, for connecting to the
+                            Redis database.
+      tenant_id             ID of the tenant.
+
+    optional arguments:
+      -h, --help            show this help message and exit
+      --debug, -d           Run the tool in debug mode.
+      --class KLASS, -c KLASS
+                            If specified, sets the class associated with the given
+                            tenant ID.
