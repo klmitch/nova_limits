@@ -258,24 +258,24 @@ def _report_limit_class(args, result):
     return None
 
 
-@add_argument('conf_file',
-              metavar='config',
-              help="Name of the configuration file, for connecting "
-              "to the Redis database.")
-@add_argument('tenant_id',
-              help="ID of the tenant.")
-@add_argument('--debug', '-d',
-              dest='debug',
-              action='store_true',
-              default=False,
-              help="Run the tool in debug mode.")
-@add_argument('--class', '-c',
-              dest='klass',
-              action='store',
-              default=None,
-              help="If specified, sets the class associated with "
-              "the given tenant ID.")
-@add_postprocessor(_report_limit_class)
+@tools.add_argument('conf_file',
+                    metavar='config',
+                    help="Name of the configuration file, for connecting "
+                    "to the Redis database.")
+@tools.add_argument('tenant_id',
+                    help="ID of the tenant.")
+@tools.add_argument('--debug', '-d',
+                    dest='debug',
+                    action='store_true',
+                    default=False,
+                    help="Run the tool in debug mode.")
+@tools.add_argument('--class', '-c',
+                    dest='klass',
+                    action='store',
+                    default=None,
+                    help="If specified, sets the class associated with "
+                    "the given tenant ID.")
+@tools.add_postprocessor(_report_limit_class)
 def limit_class(conf_file, tenant, klass=None):
     """
     Set up or query limit classes associated with tenants.
