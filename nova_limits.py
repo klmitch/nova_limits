@@ -93,7 +93,7 @@ def nova_postprocess(midware, environ):
 
     # Finally, translate Turnstile limits into Nova limits, so we can
     # use Nova's /limits endpoint
-    limits = []
+    lims = []
     for turns_lim in midware.limits:
         # If the limit has a rate_class, ensure it equals the
         # appropriate one for the user.  If the limit does not have a
@@ -136,7 +136,7 @@ def nova_postprocess(midware, environ):
                     # Substitute (some of) the values in params to
                     # make the URI more specific
                     buck_uri = fmt.vformat(uri, (), params)
-                    limits.append(dict(
+                    lims.append(dict(
                         verb=verb,
                         URI=buck_uri,
                         regex=buck_uri,
@@ -146,7 +146,7 @@ def nova_postprocess(midware, environ):
                         resetTime=bucket.expire,
                     ))
 
-            limits.append(dict(
+            lims.append(dict(
                 verb=verb,
                 URI=uri,
                 regex=uri,
@@ -159,7 +159,7 @@ def nova_postprocess(midware, environ):
             ))
 
     # Save the limits for Nova to use
-    environ['nova.limits'] = limits
+    environ['nova.limits'] = lims
 
 
 class NovaClassLimit(limits.Limit):
