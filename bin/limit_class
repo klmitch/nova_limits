@@ -16,4 +16,4 @@ import nova_limits
 
 
 if __name__ == '__main__':
-    nova_limits.limit_class()
+    nova_limits.limit_class.console()
