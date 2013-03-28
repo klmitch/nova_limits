@@ -4,20 +4,20 @@ Nova-specific Rate Limit Class for Turnstile
 
 This package provides the ``nova_limits`` Python module, which
 contains the ``nova_preprocess()`` preprocessor, the
-``NovaClassLimit`` limit class, and the ``NovaTurnstileMiddleware``
-replacement middleware class, all for use with Turnstile.  These
-pieces work together to provide class-based rate limiting integration
-with nova.  To use, you must configure the Turnstile middleware with
-the following configuration::
+``nova_postprocess()`` postprocessor, the ``NovaClassLimit`` limit
+class, and the ``nova_formatter()`` replacement delay formatter, all
+for use with Turnstile.  These pieces work together to provide
+class-based rate limiting integration with nova.  To use, you must
+configure the Turnstile middleware with the following configuration::
 
     [filter:turnstile]
     use = egg:turnstile#turnstile
-    turnstile = nova_limits:NovaTurnstileMiddleware
-    preprocess = nova_limits:nova_preprocess
+    enable = nova_limits
+    formatter = nova_limits
     redis.host = <your Redis database host>
 
-Then, simply use the ``nova_limits:NovaClassLimit`` rate limit class
-in your configuration.
+Then, simply use the ``nova_limits`` rate limit class in your limits
+configuration.
 
 Using ``NovaClassLimit``
 ========================
