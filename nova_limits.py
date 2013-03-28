@@ -59,6 +59,11 @@ def nova_preprocess(midware, environ):
     klass = midware.db.get('limit-class:%s' % tenant) or 'default'
     klass = environ.setdefault('turnstile.nova.limitclass', klass)
 
+    # Set up the nova quota class, if possible
+    if (context and hasattr(context, 'quota_class') and
+            context.quota_class is None):
+        context.quota_class = klass
+
     # Tell Turnstile where to store the bucket keys
     bucket_set = 'bucket_set:%s' % tenant
     environ['turnstile.bucket_set'] = bucket_set

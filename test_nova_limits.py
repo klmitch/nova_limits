@@ -64,7 +64,7 @@ class TestPreprocess(unittest2.TestCase):
         db = mock.Mock(**{'get.return_value': None})
         midware = mock.Mock(db=db)
         environ = {
-            'nova.context': mock.Mock(project_id='spam'),
+            'nova.context': mock.Mock(project_id='spam', spec=['project_id']),
         }
 
         nova_limits.nova_preprocess(midware, environ)
@@ -84,7 +84,7 @@ class TestPreprocess(unittest2.TestCase):
         db = mock.Mock(**{'get.return_value': 'lim_class'})
         midware = mock.Mock(db=db)
         environ = {
-            'nova.context': mock.Mock(project_id='spam'),
+            'nova.context': mock.Mock(project_id='spam', spec=['project_id']),
         }
 
         nova_limits.nova_preprocess(midware, environ)
@@ -100,11 +100,33 @@ class TestPreprocess(unittest2.TestCase):
         ])
 
     @mock.patch('time.time', return_value=1000000.0)
+    def test_configured_class_quotaclass(self, mock_time):
+        db = mock.Mock(**{'get.return_value': 'lim_class'})
+        midware = mock.Mock(db=db)
+        environ = {
+            'nova.context': mock.Mock(project_id='spam', quota_class=None,
+                                      spec=['project_id', 'quota_class']),
+        }
+
+        nova_limits.nova_preprocess(midware, environ)
+
+        self.assertDictContainsSubset({
+            'turnstile.nova.tenant': 'spam',
+            'turnstile.nova.limitclass': 'lim_class',
+            'turnstile.bucket_set': 'bucket_set:spam',
+        }, environ)
+        db.assert_has_calls([
+            mock.call.get('limit-class:spam'),
+            mock.call.zremrangebyscore('bucket_set:spam', 0, 1000000.0),
+        ])
+        self.assertEqual(environ['nova.context'].quota_class, 'lim_class')
+
+    @mock.patch('time.time', return_value=1000000.0)
     def test_class_no_override(self, mock_time):
         db = mock.Mock(**{'get.return_value': 'lim_class'})
         midware = mock.Mock(db=db)
         environ = {
-            'nova.context': mock.Mock(project_id='spam'),
+            'nova.context': mock.Mock(project_id='spam', spec=['project_id']),
             'turnstile.nova.limitclass': 'override',
         }
 
@@ -119,6 +141,29 @@ class TestPreprocess(unittest2.TestCase):
             mock.call.get('limit-class:spam'),
             mock.call.zremrangebyscore('bucket_set:spam', 0, 1000000.0),
         ])
+
+    @mock.patch('time.time', return_value=1000000.0)
+    def test_class_no_override_quotaclass(self, mock_time):
+        db = mock.Mock(**{'get.return_value': 'lim_class'})
+        midware = mock.Mock(db=db)
+        environ = {
+            'nova.context': mock.Mock(project_id='spam', quota_class=None,
+                                      spec=['project_id', 'quota_class']),
+            'turnstile.nova.limitclass': 'override',
+        }
+
+        nova_limits.nova_preprocess(midware, environ)
+
+        self.assertDictContainsSubset({
+            'turnstile.nova.tenant': 'spam',
+            'turnstile.nova.limitclass': 'override',
+            'turnstile.bucket_set': 'bucket_set:spam',
+        }, environ)
+        db.assert_has_calls([
+            mock.call.get('limit-class:spam'),
+            mock.call.zremrangebyscore('bucket_set:spam', 0, 1000000.0),
+        ])
+        self.assertEqual(environ['nova.context'].quota_class, 'override')
 
 
 class TestPostprocess(unittest2.TestCase):

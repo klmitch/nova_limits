@@ -34,3 +34,11 @@ in the given rate-limit class.
 Also note that, for nova, the URIs used in configuring rate limiting
 must include the version identifier, i.e.,
 "/v2/{tenant}/servers/detail".
+
+Quota Classes
+=============
+
+If the discovered nova context supports quota classes--that is, if the
+context object has the ``quota_class`` attribute--the quota class for
+the context will be set to be the same as the selected rate limit
+class.
