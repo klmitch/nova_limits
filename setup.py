@@ -46,7 +46,7 @@ setup(
         'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python',
         'Topic :: Internet :: WWW/HTTP :: WSGI :: Middleware',
-        ],
+    ],
     py_modules=['nova_limits'],
     install_requires=readreq('.requires'),
     tests_require=readreq('.test-requires'),
