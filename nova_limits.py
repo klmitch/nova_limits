@@ -244,8 +244,9 @@ def _report_limit_class(args, result):
     console script mode.
 
     :param args: A Namespace object containing a 'tenant_id' attribute
-                 and a desired rate-limit class (which should be None
-                 if no change was requested).
+                 and a desired rate-limit class in the 'klass'
+                 attribute (which should be None if no change was
+                 requested).
     :param result: The result of the limit_class() function call.
                    This will be the previously configured rate-limit
                    class for the tenant.
