@@ -31,7 +31,7 @@ def readfile(filename):
 
 setup(
     name='nova_limits',
-    version='0.7.0a3',
+    version='0.7.0b1',
     author='Kevin L. Mitchell',
     author_email='kevin.mitchell@rackspace.com',
     url='https://github.com/klmitch/nova_limits',
